@@ -100,6 +100,24 @@ EQUIPOS_MAPEO = {
     "sao paulo": "sao paulo", "palmeiras": "palmeiras"
 }
 
+# --- FUNCIÓN DE LIMPIEZA EXTREMA ANTI-ERRORES ---
+def safe_int(valor) -> int:
+    """Extrae solo los dígitos de un string, ignorando asteriscos, letras o símbolos."""
+    if pd.isna(valor):
+        return 0
+    # Reemplaza todo lo que NO sea un dígito por nada
+    solo_digitos = re.sub(r'[^\d]', '', str(valor))
+    return int(solo_digitos) if solo_digitos else 0
+
+def safe_float(valor) -> float:
+    """Extrae un float seguro, manejando strings sucios."""
+    if pd.isna(valor):
+        return 0.0
+    try:
+        return float(valor)
+    except (ValueError, TypeError):
+        return 0.0
+
 class HarvesterDatabase:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = db_path
@@ -181,7 +199,6 @@ class DataHarvester:
             url_template = WIKI_URLS.get(liga, "")
             if not url_template: return []
             
-            # Lógica para manejar temporadas Bianuales (2023-2024) o Anuales (2023)
             if "-" in temporada:
                 anio_ini, anio_fin = temporada.split("-")
                 anio_fin_corto = anio_fin[2:]
@@ -210,14 +227,16 @@ class DataHarvester:
                         try:
                             equipo = self.normalizar(str(row[col_eq]))
                             if equipo == 'nan': continue
-                            gf = int(row[col_gf]) if str(row[col_gf]).isdigit() else 0
-                            gc = int(row[col_gc]) if str(row[col_gc]).isdigit() else 0
+                            
+                            # Usamos safe_int para evitar el error de "2*"
+                            gf = safe_int(row[col_gf])
+                            gc = safe_int(row[col_gc])
                             
                             xg_fb = max(round(gf / 38.0, 2), 0.8)
                             xga_fb = max(round(gc / 38.0, 2), 0.8)
                             
                             registros.append((equipo, liga, temporada, gf, gc, xg_fb, xga_fb, 50.0, "Wikipedia"))
-                        except (IndexError, ValueError):
+                        except Exception:
                             continue
                     break
             logging.info(f"Wikipedia Fallback rescató {len(registros)} registros para {liga} {temporada}.")
@@ -282,19 +301,22 @@ class DataHarvester:
                                     if not raw_name or raw_name.lower() == 'nan' or 'vs' in raw_name.lower(): continue
                                     
                                     equipo = self.normalizar(raw_name)
-                                    gf = int(row[col_gf]) if pd.notna(row[col_gf]) else 0
-                                    gc = int(row[col_ga]) if pd.notna(row[col_ga]) else 0
                                     
-                                    xg_val = float(row[col_xg]) if (col_xg and pd.notna(row[col_xg])) else 0.0
-                                    xga_val = float(row[col_xga]) if (col_xga and pd.notna(row[col_xga])) else 0.0
+                                    # Usamos las funciones safe para proteger los datos
+                                    gf = safe_int(row[col_gf])
+                                    gc = safe_int(row[col_ga])
+                                    
+                                    xg_val = safe_float(row[col_xg]) if col_xg else 0.0
+                                    xga_val = safe_float(row[col_xga]) if col_xga else 0.0
                                     
                                     if xg_val <= 0.0: xg_val = max(round(gf / 38.0, 2), 0.8)
                                     if xga_val <= 0.0: xga_val = max(round(gc / 38.0, 2), 0.8)
                                         
-                                    poss = float(row[col_poss]) if (col_poss and pd.notna(row[col_poss])) else 50.0
+                                    poss = safe_float(row[col_poss]) if col_poss else 50.0
                                     
                                     registros.append((equipo, liga_nombre, temporada, gf, gc, xg_val, xga_val, poss, "FBref"))
-                                except (ValueError, TypeError): continue
+                                except Exception: 
+                                    continue
                         break
             except Exception as e:
                 logging.warning(f"Cloudflare/Error en {liga_nombre} {temporada} (Intento {intento+1}): {e}")
