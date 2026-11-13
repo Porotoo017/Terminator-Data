@@ -144,7 +144,12 @@ class DataHarvester:
             url = url_template.format(anio_ini, anio_fin_corto)
             logging.info(f"Intentando Fallback Wikipedia: {url}")
             
-            tables = pd.read_html(url)
+            # PARCHE ANTI-403: Simulamos ser un navegador real
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+            response = requests.get(url, headers=headers, timeout=15)
+            response.raise_for_status() # Lanza error si no es 200
+            
+            tables = pd.read_html(io.StringIO(response.text))
             for df in tables:
                 cols = {str(c).lower(): c for c in df.columns}
                 col_eq = next((cols[c] for c in cols if 'equip' in c or 'club' in c), None)
@@ -192,8 +197,9 @@ class DataHarvester:
                     page = context.new_page()
                     
                     logging.info(f"Extrayendo [{liga_nombre}] Temporada [{temporada}] (Intento {intento+1})...")
-                    page.goto(url, timeout=60000)
-                    page.wait_for_selector("table#stats_squads_standard_for", timeout=30000)
+                    # PARCHE ANTI-CLOUDFLARE: Espera a que cargue el DOM y le da tiempo extra
+                    page.goto(url, timeout=90000, wait_until="domcontentloaded")
+                    page.wait_for_timeout(5000) # 5 segundos de espera táctica
                     
                     html_completo = page.content()
                     browser.close()
