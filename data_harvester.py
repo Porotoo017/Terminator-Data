@@ -30,40 +30,34 @@ USER_AGENTS = [
 
 # --- CONFIGURACIÓN DE LIGAS (GLOBAL) ---
 LIGAS_CONFIG = {
-    # Europa Top
     "Premier-League": 9,
     "La-Liga": 12,
     "Serie-A": 11,
     "Bundesliga": 20,
     "Ligue-1": 13,
-    # Europa Copas
     "Champions-League": 8,
     "Europa-League": 19,
     "Conference-League": 882,
-    # Europa Segunda División
     "Championship": 10,
     "LaLiga-2": 17,
     "Serie-B": 18,
     "Bundesliga-2": 33,
     "Eredivisie": 23,
-    # Sudamérica
     "Primera-Division": 21,       # Liga Profesional Argentina
     "Primera-Nacional": 22,       # Primera Nacional B Argentina
     "Serie-A-Brasil": 24,         # Brasileirao
     "Copa-Libertadores": 14,
     "Copa-Sudamericana": 15,
     "Copa-Argentina": 917,
-    # Norteamérica
     "Liga-MX": 31,
     "MLS": 22
 }
 
-# Temporadas según el formato de cada liga
-TEMPORADAS_ANUALES = ["2023", "2022", "2021", "2020", "2019"]
-TEMPORADAS_BIANUALES = ["2023-2024", "2022-2023", "2021-2022", "2020-2021", "2019-2020"]
+# --- ACÁ ESTÁ LA CORRECCIÓN: AGREGAMOS LOS AÑOS HASTA 2026 ---
+TEMPORADAS_ANUALES = ["2026", "2025", "2024", "2023", "2022", "2021", "2020", "2019"]
+TEMPORADAS_BIANUALES = ["2025-2026", "2024-2025", "2023-2024", "2022-2023", "2021-2022", "2020-2021", "2019-2020"]
 
 WIKI_URLS = {
-    # Europa
     "Premier-League": "https://es.wikipedia.org/wiki/Premier_League_{}-{}",
     "La-Liga": "https://es.wikipedia.org/wiki/Primera_División_de_España_{}-{}",
     "Serie-A": "https://es.wikipedia.org/wiki/Serie_A_(Italia)_{}-{}",
@@ -71,20 +65,18 @@ WIKI_URLS = {
     "Ligue-1": "https://es.wikipedia.org/wiki/Ligue_1_{}-{}",
     "Champions-League": "https://es.wikipedia.org/wiki/Liga_de_Campeones_de_la_UEFA_{}-{}",
     "Europa-League": "https://es.wikipedia.org/wiki/Liga_Europa_de_la_UEFA_{}-{}",
-    "Conference-League": "https://es.wikipedia.org/wiki/Liga_Conferencia_de_la_UEFA_{}-{}",
+    "Conference-League": "https://es.wikipedia.org/wiki/UEFA_Europa_Conference_League_{}-{}", # Corregido nombre en inglés
     "Championship": "https://es.wikipedia.org/wiki/EFL_Championship_{}-{}",
     "LaLiga-2": "https://es.wikipedia.org/wiki/Segunda_División_de_España_{}-{}",
     "Serie-B": "https://es.wikipedia.org/wiki/Serie_B_(Italia)_{}-{}",
     "Bundesliga-2": "https://es.wikipedia.org/wiki/2._Bundesliga_{}-{}",
     "Eredivisie": "https://es.wikipedia.org/wiki/Eredivisie_{}-{}",
-    # Sudamérica (Formato Anual)
     "Primera-Division": "https://es.wikipedia.org/wiki/Campeonato_de_Primera_División_{}_(Argentina)",
     "Primera-Nacional": "https://es.wikipedia.org/wiki/Campeonato_de_Primera_Nacional_{}_(Argentina)",
     "Serie-A-Brasil": "https://es.wikipedia.org/wiki/Campeonato_Brasileño_de_Serie_A_{}",
     "Copa-Libertadores": "https://es.wikipedia.org/wiki/Copa_Libertadores_de_América_{}",
     "Copa-Sudamericana": "https://es.wikipedia.org/wiki/Copa_Sudamericana_{}",
     "Copa-Argentina": "https://es.wikipedia.org/wiki/Copa_Argentina_{}",
-    # Norteamérica
     "Liga-MX": "https://es.wikipedia.org/wiki/Liga_MX_{}",
     "MLS": "https://es.wikipedia.org/wiki/Major_League_Soccer_{}"
 }
@@ -100,23 +92,15 @@ EQUIPOS_MAPEO = {
     "sao paulo": "sao paulo", "palmeiras": "palmeiras"
 }
 
-# --- FUNCIÓN DE LIMPIEZA EXTREMA ANTI-ERRORES ---
 def safe_int(valor) -> int:
-    """Extrae solo los dígitos de un string, ignorando asteriscos, letras o símbolos."""
-    if pd.isna(valor):
-        return 0
-    # Reemplaza todo lo que NO sea un dígito por nada
+    if pd.isna(valor): return 0
     solo_digitos = re.sub(r'[^\d]', '', str(valor))
     return int(solo_digitos) if solo_digitos else 0
 
 def safe_float(valor) -> float:
-    """Extrae un float seguro, manejando strings sucios."""
-    if pd.isna(valor):
-        return 0.0
-    try:
-        return float(valor)
-    except (ValueError, TypeError):
-        return 0.0
+    if pd.isna(valor): return 0.0
+    try: return float(valor)
+    except (ValueError, TypeError): return 0.0
 
 class HarvesterDatabase:
     def __init__(self, db_path: str = DB_PATH):
@@ -144,7 +128,6 @@ class HarvesterDatabase:
                     )
                 """)
                 conn.commit()
-                logging.info("Esquema de Base de Datos Harvester inicializado correctamente.")
         except sqlite3.Error as e:
             logging.error(f"Error crítico inicializando esquema DB: {e}")
 
@@ -210,7 +193,6 @@ class DataHarvester:
                 url = url_template.format(temporada)
                 
             logging.info(f"Intentando Fallback Wikipedia: {url}")
-            
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
             response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status() 
@@ -227,17 +209,12 @@ class DataHarvester:
                         try:
                             equipo = self.normalizar(str(row[col_eq]))
                             if equipo == 'nan': continue
-                            
-                            # Usamos safe_int para evitar el error de "2*"
                             gf = safe_int(row[col_gf])
                             gc = safe_int(row[col_gc])
-                            
                             xg_fb = max(round(gf / 38.0, 2), 0.8)
                             xga_fb = max(round(gc / 38.0, 2), 0.8)
-                            
                             registros.append((equipo, liga, temporada, gf, gc, xg_fb, xga_fb, 50.0, "Wikipedia"))
-                        except Exception:
-                            continue
+                        except Exception: continue
                     break
             logging.info(f"Wikipedia Fallback rescató {len(registros)} registros para {liga} {temporada}.")
         except Exception as e:
@@ -252,16 +229,8 @@ class DataHarvester:
             ua = random.choice(USER_AGENTS)
             try:
                 with sync_playwright() as p:
-                    browser = p.chromium.launch(
-                        headless=True,
-                        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-                    )
-                    context = browser.new_context(
-                        user_agent=ua,
-                        viewport={"width": 1920, "height": 1080},
-                        bypass_csp=True,
-                        ignore_https_errors=True
-                    )
+                    browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
+                    context = browser.new_context(user_agent=ua, viewport={"width": 1920, "height": 1080}, bypass_csp=True, ignore_https_errors=True)
                     page = context.new_page()
                     
                     logging.info(f"Extrayendo [{liga_nombre}] Temporada [{temporada}] (Intento {intento+1})...")
@@ -283,8 +252,7 @@ class DataHarvester:
 
                     if tabla_html:
                         df = pd.read_html(io.StringIO(str(tabla_html)))[0]
-                        if isinstance(df.columns, pd.MultiIndex):
-                            df.columns = df.columns.droplevel(0)
+                        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.droplevel(0)
                         
                         cols = {str(c).lower(): c for c in df.columns}
                         col_squad = next((cols[c] for c in cols if 'squad' in c), None)
@@ -299,24 +267,16 @@ class DataHarvester:
                                 try:
                                     raw_name = str(row[col_squad])
                                     if not raw_name or raw_name.lower() == 'nan' or 'vs' in raw_name.lower(): continue
-                                    
                                     equipo = self.normalizar(raw_name)
-                                    
-                                    # Usamos las funciones safe para proteger los datos
                                     gf = safe_int(row[col_gf])
                                     gc = safe_int(row[col_ga])
-                                    
                                     xg_val = safe_float(row[col_xg]) if col_xg else 0.0
                                     xga_val = safe_float(row[col_xga]) if col_xga else 0.0
-                                    
                                     if xg_val <= 0.0: xg_val = max(round(gf / 38.0, 2), 0.8)
                                     if xga_val <= 0.0: xga_val = max(round(gc / 38.0, 2), 0.8)
-                                        
                                     poss = safe_float(row[col_poss]) if col_poss else 50.0
-                                    
                                     registros.append((equipo, liga_nombre, temporada, gf, gc, xg_val, xga_val, poss, "FBref"))
-                                except Exception: 
-                                    continue
+                                except Exception: continue
                         break
             except Exception as e:
                 logging.warning(f"Cloudflare/Error en {liga_nombre} {temporada} (Intento {intento+1}): {e}")
@@ -329,7 +289,7 @@ class DataHarvester:
         return registros
 
     def ejecutar_cosecha_masiva(self) -> None:
-        logging.info("=== INICIANDO COSECHA MASIVA HISTÓRICA (DATA HARVESTER V3 - GLOBAL) ===")
+        logging.info("=== INICIANDO COSECHA MASIVA HISTÓRICA (DATA HARVESTER V4 - ACTUALIZADO A 2026) ===")
         
         ligas_anuales = ["Primera-Division", "Primera-Nacional", "Serie-A-Brasil", "Copa-Libertadores", "Copa-Sudamericana", "Copa-Argentina", "Liga-MX", "MLS"]
         
@@ -343,7 +303,6 @@ class DataHarvester:
                 datos = self.cosechar_temporada(liga_nombre, liga_id, temporada)
                 if datos:
                     self.db.bulk_insert_historial(datos)
-                
                 pausa = random.uniform(8.0, 15.0)
                 logging.info(f"Pausa de sigilo: durmiendo {pausa:.2f} segundos...")
                 time.sleep(pausa)
