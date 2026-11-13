@@ -3,6 +3,9 @@ name: Data Harvester Master V2
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   harvest-data:
     runs-on: ubuntu-latest
@@ -20,7 +23,7 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests pandas beautifulsoup4 playwright lxml html5lib numpy
+        pip install -r requirements.txt
 
     - name: Install Playwright Browsers & Dependencies
       run: |
