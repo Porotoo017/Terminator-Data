@@ -1,0 +1,39 @@
+name: Data Harvester Master V2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  harvest-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install Playwright Browsers & Dependencies
+      run: |
+        playwright install --with-deps chromium
+
+    - name: Run Data Harvester
+      run: |
+        python data_harvester.py
+
+    - name: Commit and Push Database Updates
+      run: |
+        git config --global user.name "Terminator Harvester Bot"
+        git config --global user.email "harvester@bot.com"
+        git add data/quant_master.db
+        git commit -m "Auto-update: Base de datos histórica masiva y caché xG [skip ci]" || echo "No hay cambios en la DB para commitear"
+        git push
