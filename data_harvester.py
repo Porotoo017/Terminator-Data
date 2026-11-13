@@ -25,28 +25,68 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2.1 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.2277.83"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
 ]
 
+# --- CONFIGURACIÓN DE LIGAS (GLOBAL) ---
 LIGAS_CONFIG = {
+    # Europa Top
     "Premier-League": 9,
     "La-Liga": 12,
     "Serie-A": 11,
     "Bundesliga": 20,
     "Ligue-1": 13,
-    "Champions-League": 8
+    # Europa Copas
+    "Champions-League": 8,
+    "Europa-League": 19,
+    "Conference-League": 882,
+    # Europa Segunda División
+    "Championship": 10,
+    "LaLiga-2": 17,
+    "Serie-B": 18,
+    "Bundesliga-2": 33,
+    "Eredivisie": 23,
+    # Sudamérica
+    "Primera-Division": 21,       # Liga Profesional Argentina
+    "Primera-Nacional": 22,       # Primera Nacional B Argentina
+    "Serie-A-Brasil": 24,         # Brasileirao
+    "Copa-Libertadores": 14,
+    "Copa-Sudamericana": 15,
+    "Copa-Argentina": 917,
+    # Norteamérica
+    "Liga-MX": 31,
+    "MLS": 22
 }
 
-TEMPORADAS = ["2023-2024", "2022-2023", "2021-2022", "2020-2021", "2019-2020"]
+# Temporadas según el formato de cada liga
+TEMPORADAS_ANUALES = ["2023", "2022", "2021", "2020", "2019"]
+TEMPORADAS_BIANUALES = ["2023-2024", "2022-2023", "2021-2022", "2020-2021", "2019-2020"]
 
 WIKI_URLS = {
+    # Europa
     "Premier-League": "https://es.wikipedia.org/wiki/Premier_League_{}-{}",
     "La-Liga": "https://es.wikipedia.org/wiki/Primera_División_de_España_{}-{}",
     "Serie-A": "https://es.wikipedia.org/wiki/Serie_A_(Italia)_{}-{}",
     "Bundesliga": "https://es.wikipedia.org/wiki/1._Bundesliga_{}-{}",
     "Ligue-1": "https://es.wikipedia.org/wiki/Ligue_1_{}-{}",
-    "Champions-League": "https://es.wikipedia.org/wiki/Liga_de_Campeones_de_la_UEFA_{}-{}"
+    "Champions-League": "https://es.wikipedia.org/wiki/Liga_de_Campeones_de_la_UEFA_{}-{}",
+    "Europa-League": "https://es.wikipedia.org/wiki/Liga_Europa_de_la_UEFA_{}-{}",
+    "Conference-League": "https://es.wikipedia.org/wiki/Liga_Conferencia_de_la_UEFA_{}-{}",
+    "Championship": "https://es.wikipedia.org/wiki/EFL_Championship_{}-{}",
+    "LaLiga-2": "https://es.wikipedia.org/wiki/Segunda_División_de_España_{}-{}",
+    "Serie-B": "https://es.wikipedia.org/wiki/Serie_B_(Italia)_{}-{}",
+    "Bundesliga-2": "https://es.wikipedia.org/wiki/2._Bundesliga_{}-{}",
+    "Eredivisie": "https://es.wikipedia.org/wiki/Eredivisie_{}-{}",
+    # Sudamérica (Formato Anual)
+    "Primera-Division": "https://es.wikipedia.org/wiki/Campeonato_de_Primera_División_{}_(Argentina)",
+    "Primera-Nacional": "https://es.wikipedia.org/wiki/Campeonato_de_Primera_Nacional_{}_(Argentina)",
+    "Serie-A-Brasil": "https://es.wikipedia.org/wiki/Campeonato_Brasileño_de_Serie_A_{}",
+    "Copa-Libertadores": "https://es.wikipedia.org/wiki/Copa_Libertadores_de_América_{}",
+    "Copa-Sudamericana": "https://es.wikipedia.org/wiki/Copa_Sudamericana_{}",
+    "Copa-Argentina": "https://es.wikipedia.org/wiki/Copa_Argentina_{}",
+    # Norteamérica
+    "Liga-MX": "https://es.wikipedia.org/wiki/Liga_MX_{}",
+    "MLS": "https://es.wikipedia.org/wiki/Major_League_Soccer_{}"
 }
 
 EQUIPOS_MAPEO = {
@@ -55,7 +95,9 @@ EQUIPOS_MAPEO = {
     "newcastle": "newcastle united", "nottingham": "nottingham forest",
     "boca": "boca juniors", "river": "river plate", "real madrid cf": "real madrid",
     "fc barcelona": "barcelona", "bayern munich": "bayern munchen",
-    "inter": "inter milan", "ac milan": "milan", "paris sg": "psg"
+    "inter": "inter milan", "ac milan": "milan", "paris sg": "psg",
+    "estudiantes de la plata": "estudiantes", "velez sarsfield": "velez",
+    "sao paulo": "sao paulo", "palmeiras": "palmeiras"
 }
 
 class HarvesterDatabase:
@@ -136,18 +178,25 @@ class DataHarvester:
     def extraer_wikipedia_fallback(self, liga: str, temporada: str) -> List[Tuple]:
         registros = []
         try:
-            anio_ini, anio_fin = temporada.split("-")
-            anio_fin_corto = anio_fin[2:]
             url_template = WIKI_URLS.get(liga, "")
             if not url_template: return []
             
-            url = url_template.format(anio_ini, anio_fin_corto)
+            # Lógica para manejar temporadas Bianuales (2023-2024) o Anuales (2023)
+            if "-" in temporada:
+                anio_ini, anio_fin = temporada.split("-")
+                anio_fin_corto = anio_fin[2:]
+                try:
+                    url = url_template.format(anio_ini, anio_fin_corto)
+                except IndexError:
+                    url = url_template.format(anio_ini)
+            else:
+                url = url_template.format(temporada)
+                
             logging.info(f"Intentando Fallback Wikipedia: {url}")
             
-            # PARCHE ANTI-403: Simulamos ser un navegador real
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
             response = requests.get(url, headers=headers, timeout=15)
-            response.raise_for_status() # Lanza error si no es 200
+            response.raise_for_status() 
             
             tables = pd.read_html(io.StringIO(response.text))
             for df in tables:
@@ -197,9 +246,8 @@ class DataHarvester:
                     page = context.new_page()
                     
                     logging.info(f"Extrayendo [{liga_nombre}] Temporada [{temporada}] (Intento {intento+1})...")
-                    # PARCHE ANTI-CLOUDFLARE: Espera a que cargue el DOM y le da tiempo extra
                     page.goto(url, timeout=90000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(5000) # 5 segundos de espera táctica
+                    page.wait_for_timeout(5000) 
                     
                     html_completo = page.content()
                     browser.close()
@@ -259,10 +307,17 @@ class DataHarvester:
         return registros
 
     def ejecutar_cosecha_masiva(self) -> None:
-        logging.info("=== INICIANDO COSECHA MASIVA HISTÓRICA (DATA HARVESTER V2) ===")
+        logging.info("=== INICIANDO COSECHA MASIVA HISTÓRICA (DATA HARVESTER V3 - GLOBAL) ===")
+        
+        ligas_anuales = ["Primera-Division", "Primera-Nacional", "Serie-A-Brasil", "Copa-Libertadores", "Copa-Sudamericana", "Copa-Argentina", "Liga-MX", "MLS"]
         
         for liga_nombre, liga_id in LIGAS_CONFIG.items():
-            for temporada in TEMPORADAS:
+            if liga_nombre in ligas_anuales:
+                temporadas_a_usar = TEMPORADAS_ANUALES
+            else:
+                temporadas_a_usar = TEMPORADAS_BIANUALES
+
+            for temporada in temporadas_a_usar:
                 datos = self.cosechar_temporada(liga_nombre, liga_id, temporada)
                 if datos:
                     self.db.bulk_insert_historial(datos)
@@ -272,7 +327,7 @@ class DataHarvester:
                 time.sleep(pausa)
                 
         self.db.actualizar_cache_xg_global()
-        logging.info("=== COSECHA MASIVA Y ACTUALIZACIÓN DE CACHÉ COMPLETADAS ===")
+        logging.info("=== COSECHA MASIVA GLOBAL COMPLETADA ===")
 
 def main():
     db = HarvesterDatabase()
