@@ -5,7 +5,7 @@ import os
 import math
 import json
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Dict
 
 # --- CONFIGURACIÓN ---
@@ -17,7 +17,7 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# --- CONFIGURACIÓN DE LIGAS (Agregá las que quieras) ---
+# --- CONFIGURACIÓN DE LIGAS ---
 SPORT_KEYS = [
     "soccer_argentina_primera_division",
     "soccer_conmebol_copa_libertadores",
@@ -45,11 +45,6 @@ def calcular_ev(prob: float, cuota: float) -> Tuple[float, bool]:
     ev = prob * cuota
     return ev, ev > 1.0
 
-# --- NORMALIZADOR DE NOMBRES ---
-def normalizar_texto(texto: str) -> str:
-    texto = unicodedata.normalize('NFKD', texto).encode('ASCII', 'ignore').decode('utf-8')
-    return texto.lower().strip().replace(" ", "")
-
 # --- BASE DE DATOS ---
 def obtener_xg(equipo: str) -> Tuple[float, float]:
     try:
@@ -64,10 +59,11 @@ def obtener_xg(equipo: str) -> Tuple[float, float]:
         logging.error(f"Error BD: {e}")
     return 1.3, 1.1 
 
-# --- OBTENER PARTIDOS Y CUOTAS DE HOY DESDE THE ODDS API ---
+# --- OBTENER PARTIDOS Y CUOTAS (FILTRO AMPLIADO A 48 HORAS) ---
 def obtener_partidos_y_cuotas_hoy() -> List[Dict]:
     partidos_hoy = []
-    hoy_utc = datetime.now(timezone.utc).date()
+    ahora = datetime.now(timezone.utc)
+    limite_futuro = ahora + timedelta(days=2) # Buscar partidos de hoy y mañana (por la zona horaria)
     
     if not ODDS_API_KEY:
         logging.warning("ODDS_API_KEY no configurada.")
@@ -89,13 +85,15 @@ def obtener_partidos_y_cuotas_hoy() -> List[Dict]:
                 continue
                 
             eventos = response.json()
+            logging.info(f"Liga {sport}: API devolvió {len(eventos)} eventos.")
+            
             for evento in eventos:
-                # Filtrar por fecha (si se juega hoy)
                 commence_time = evento.get("commence_time", "")
                 if commence_time:
-                    fecha_partido = datetime.fromisoformat(commence_time.replace("Z", "+00:00")).date()
-                    if fecha_partido != hoy_utc:
-                        continue # Si no es hoy, lo salteamos
+                    fecha_partido = datetime.fromisoformat(commence_time.replace("Z", "+00:00"))
+                    # FILTRO: Si el partido es en el pasado, o falta mucho, lo salteamos
+                    if fecha_partido < ahora - timedelta(hours=3) or fecha_partido > limite_futuro:
+                        continue 
 
                 local_api = evento.get("home_team", "")
                 visitante_api = evento.get("away_team", "")
@@ -131,19 +129,18 @@ def enviar_telegram(mensaje: str):
         logging.error(f"Error Telegram: {e}")
 
 def main():
-    logging.info("=== INICIANDO REPORTE MATUTINO PRO (API REAL CON FECHA) ===")
+    logging.info("=== INICIANDO REPORTE MATUTINO PRO (API REAL CON FECHA 48H) ===")
     fecha = datetime.now().strftime("%d/%m/%Y")
     
     partidos_api = obtener_partidos_y_cuotas_hoy()
     
     msg = f"☀️ <b>REPORTE MATUTINO PRO - {fecha}</b>\n"
-    msg += "Análisis de Poisson + Cuotas Reales (Partidos de Hoy):\n\n"
+    msg += "Análisis de Poisson + Cuotas Reales (Próximos 2 días):\n\n"
     
     if not partidos_api:
         msg += "⚠️ <i>No se encontraron partidos programados para hoy en las ligas seleccionadas.</i>\n"
     else:
         for p in partidos_api:
-            # Intentamos buscar los equipos de la API en nuestra base de datos
             xg_l, xga_l = obtener_xg(p["local_api"])
             xg_v, xga_v = obtener_xg(p["visitante_api"])
             
