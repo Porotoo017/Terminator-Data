@@ -51,11 +51,10 @@ def procesar_mensaje(mensaje: Dict[str, Any]):
     if texto.startswith("/start"):
         teclado = {
             "inline_keyboard": [
-                [{"text": "📈 Buscar Equipo (Ej: /stats boca)", "callback_data": "ayuda"}],
-                [{"text": "⚽ Ver mi Base de Datos", "callback_data": "db"}]
+                [{"text": "📈 Buscar Equipo (Ej: /stats boca)", "callback_data": "ayuda"}]
             ]
         }
-        enviar_mensaje(chat_id, "🤖 <b>Terminator App V1</b>\n\nSoy tu analista de datos deportivos. Escribí el comando <code>/stats [equipo]</code> para ver sus probabilidades históricas.\n\nEjemplo: <code>/stats river</code>", reply_markup=teclado)
+        enviar_mensaje(chat_id, "🤖 <b>Fútbol Data V1</b>\n\nSoy tu analista de datos deportivos. Escribí el comando <code>/stats [equipo]</code> para ver sus probabilidades históricas.\n\nEjemplo: <code>/stats river</code>", reply_markup=teclado)
         
     elif texto.startswith("/stats"):
         partes = texto.split(maxsplit=1)
@@ -68,6 +67,9 @@ def procesar_mensaje(mensaje: Dict[str, Any]):
 
 def main():
     try:
+        # PARCHE: Eliminar cualquier Webhook que esté bloqueando la lectura de mensajes
+        requests.get(f"{API_URL}/deleteWebhook", timeout=10)
+        
         response = requests.get(f"{API_URL}/getUpdates?timeout=5", timeout=10)
         if response.status_code != 200:
             logging.error(f"Error de API: {response.text}")
