@@ -16,8 +16,12 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# --- LIGAS TOP ---
+# --- LIGAS Y TORNEOS (Clubes + Selecciones) ---
 SPORT_KEYS = [
+    # Selecciones (Para fechas FIFA y torneos internacionales)
+    "soccer_uefa_nations_league",
+    "soccer_concacaf_nations_league",
+    # Ligas de Clubes
     "soccer_argentina_primera_division",
     "soccer_epl",
     "soccer_spain_la_liga",
@@ -28,7 +32,7 @@ SPORT_KEYS = [
     "soccer_conmebol_copa_libertadores"
 ]
 
-# --- MOTOR MATEMÁTICO ---
+# --- MOTOR MATEMÁTICO (POISSON) ---
 def poisson_pmf(k: int, lam: float) -> float:
     return (lam**k * math.exp(-lam)) / math.factorial(k)
 
@@ -48,6 +52,7 @@ def calcular_ev(prob: float, cuota: float) -> Tuple[float, bool]:
     ev = prob * cuota
     return ev, ev > 1.0
 
+# --- BASE DE DATOS ---
 def obtener_xg(equipo: str) -> Tuple[float, float]:
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -59,24 +64,31 @@ def obtener_xg(equipo: str) -> Tuple[float, float]:
             if row: return row[0], row[1]
     except Exception as e:
         logging.error(f"Error BD: {e}")
-    return 1.3, 1.1 
+    return 1.3, 1.1 # Fallback si el equipo no está en la base de datos
 
-# --- OBTENER PARTIDOS CON FILTRO DE 72 HORAS ---
+# --- OBTENER PARTIDOS Y CUOTAS CON FILTRO DE 72 HORAS ---
 def obtener_partidos_y_cuotas() -> List[Dict]:
     partidos_cercanos = []
-    partidos_lejanos = [] # Para usarlos como "Radar" si no hay nada cerca
+    partidos_lejanos = [] 
     ahora = datetime.now(timezone.utc)
     limite_72h = ahora + timedelta(hours=72)
 
     if not ODDS_API_KEY:
+        logging.warning("ODDS_API_KEY no configurada.")
         return []
 
     for sport in SPORT_KEYS:
         try:
             url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
-            params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h", "oddsFormat": "decimal"}
+            params = {
+                "apiKey": ODDS_API_KEY,
+                "regions": "eu",
+                "markets": "h2h",
+                "oddsFormat": "decimal"
+            }
             response = requests.get(url, params=params, timeout=10)
-            if response.status_code != 200: continue
+            if response.status_code != 200:
+                continue
                 
             eventos = response.json()
             for evento in eventos:
@@ -113,7 +125,7 @@ def obtener_partidos_y_cuotas() -> List[Dict]:
     if partidos_cercanos:
         return partidos_cercanos
     else:
-        return partidos_lejanos[:5] # Los 5 próximos partidos futuros
+        return partidos_lejanos[:5] # Los 5 próximos partidos futuros como "radar"
 
 def enviar_telegram(mensaje: str):
     try:
@@ -147,22 +159,24 @@ def main():
             ev_e, val_e = calcular_ev(probs['empate'], cuotas['empate'])
             ev_v, val_v = calcular_ev(probs['visitante'], cuotas['visitante'])
             
+            # Formatear fecha para que se vea linda
             fecha_formateada = p["fecha"][:16].replace("T", " ") if p["fecha"] else "Fecha N/D"
             
             msg += f"🏆 <b>{p['local']} vs {p['visitante']}</b>\n"
-            msg += f"📅 Fecha: {fecha_formateada} UTC\n"
+            msg += f"📅 {fecha_formateada} UTC\n"
             msg += f"📊 Prob: Local {probs['local']:.1%} | Empate {probs['empate']:.1%} | Visitante {probs['visitante']:.1%}\n"
             msg += f"💰 Cuotas: Local {cuotas['local']} | Empate {cuotas['empate']} | Visitante {cuotas['visitante']}\n"
             
-            if val_l: msg += f"🚨 <b>VALUE BET LOCAL:</b> EV +{(ev_l-1)*100:.1%}\n"
-            if val_e: msg += f"🚨 <b>VALUE BET EMPATE:</b> EV +{(ev_e-1)*100:.1%}\n"
-            if val_v: msg += f"🚨 <b>VALUE BET VISITANTE:</b> EV +{(ev_v-1)*100:.1%}\n"
+            if val_l: msg += f"🚨 <b>VALUE BET LOCAL:</b> EV +{(ev_l-1)*100:.1f}%\n"
+            if val_e: msg += f"🚨 <b>VALUE BET EMPATE:</b> EV +{(ev_e-1)*100:.1f}%\n"
+            if val_v: msg += f"🚨 <b>VALUE BET VISITANTE:</b> EV +{(ev_v-1)*100:.1f}%\n"
             
-            if not (val_l or val_e or val_v): msg += f"🛡️ Sin Value Bets.\n"
+            if not (val_l or val_e or val_v): msg += f"🛡️ Sin Value Bets (Mercado eficiente).\n"
             msg += "➖➖➖➖➖➖➖➖\n"
         
     msg += "\n🤖 <i>Generado por Terminator Motor Predictivo</i>"
     enviar_telegram(msg)
+    logging.info("Reporte enviado.")
 
 if __name__ == "__main__":
     main()
