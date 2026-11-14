@@ -4,6 +4,7 @@ import logging
 import os
 import math
 import json
+import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Dict
 
@@ -16,11 +17,8 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# --- LIGAS Y TORNEOS ---
+# --- LIGAS OPTIMIZADAS (Solo Clubes para usar datos reales de la DB) ---
 SPORT_KEYS = [
-    "soccer_uefa_nations_league",
-    "soccer_concacaf_nations_league",
-    "soccer_international_friendlies",
     "soccer_argentina_primera_division",
     "soccer_epl",
     "soccer_spain_la_liga",
@@ -49,53 +47,53 @@ def calcular_prediccion(xg_local: float, xg_visitante: float, max_goles: int = 5
 
 def calcular_ev(prob: float, cuota: float) -> Tuple[float, bool]:
     ev = prob * cuota
-    return ev, ev > 1.0
+    return ev, ev > 1.05 # Umbral de Value Bet: 5% de ventaja
+
+# --- LIMPIADOR DE NOMBRES (Para cruzar API con DB) ---
+def limpiar_nombre_equipo(nombre: str) -> str:
+    # Elimina palabras comunes de la API que no están en la base de datos
+    nombre = nombre.lower()
+    palabras_basura = ["ca ", "cf ", "fc ", "club atletico ", "ba", "de cordoba", "de la plata", "sarsfield"]
+    for palabra in palabras_basura:
+        nombre = nombre.replace(palabra, "")
+    return nombre.strip()
 
 # --- BASE DE DATOS ---
 def obtener_xg(equipo: str) -> Tuple[float, float]:
+    equipo_limpio = limpiar_nombre_equipo(equipo)
     try:
         with sqlite3.connect(DB_PATH) as conn:
             cursor = conn.execute(
                 "SELECT xg, xga FROM cache_xg WHERE equipo LIKE ? LIMIT 1", 
-                (f"%{equipo.lower()}%",)
+                (f"%{equipo_limpio}%",)
             )
             row = cursor.fetchone()
             if row: return row[0], row[1]
     except Exception as e:
         logging.error(f"Error BD: {e}")
-    return 1.3, 1.1 
+    return 1.3, 1.1 # Fallback si el equipo no está en la DB
 
-# --- OBTENER PARTIDOS Y CUOTAS (FILTRO DE 7 DÍAS) ---
+# --- OBTENER PARTIDOS Y CUOTAS ---
 def obtener_partidos_y_cuotas() -> List[Dict]:
-    partidos_cercanos = []
+    partidos = []
     ahora = datetime.now(timezone.utc)
-    limite_futuro = ahora + timedelta(days=7) # Filtro ampliado a 7 días
+    limite_futuro = ahora + timedelta(days=7)
 
     if not ODDS_API_KEY:
-        logging.warning("ODDS_API_KEY no configurada.")
         return []
 
     for sport in SPORT_KEYS:
         try:
             url = f"https://api.the-odds-api.com/v4/sports/{sport}/odds"
-            params = {
-                "apiKey": ODDS_API_KEY,
-                "regions": "eu",
-                "markets": "h2h",
-                "oddsFormat": "decimal"
-            }
+            params = {"apiKey": ODDS_API_KEY, "regions": "eu", "markets": "h2h", "oddsFormat": "decimal"}
             response = requests.get(url, params=params, timeout=10)
-            if response.status_code != 200:
-                continue
+            if response.status_code != 200: continue
                 
-            eventos = response.json()
-            for evento in eventos:
+            for evento in response.json():
                 fecha_str = evento.get("commence_time", "")
-                
                 if fecha_str:
                     fecha_partido = datetime.fromisoformat(fecha_str.replace("Z", "+00:00"))
-                    if fecha_partido > limite_futuro:
-                        continue # Si es más lejano a 7 días, lo salteamos
+                    if fecha_partido > limite_futuro: continue
 
                 local_api = evento.get("home_team", "")
                 visitante_api = evento.get("away_team", "")
@@ -111,22 +109,16 @@ def obtener_partidos_y_cuotas() -> List[Dict]:
                                 elif outcome["name"] == "Draw": cuotas["empate"] = outcome["price"]
                             
                 if cuotas["local"] > 0 and cuotas["visitante"] > 0:
-                    partidos_cercanos.append({
-                        "local": local_api, "visitante": visitante_api, 
-                        "cuotas": cuotas, "fecha": fecha_str
-                    })
+                    partidos.append({"local": local_api, "visitante": visitante_api, "cuotas": cuotas, "fecha": fecha_str})
         except Exception as e:
             logging.error(f"Error API ({sport}): {e}")
             
-    # Ordenamos los partidos por fecha
-    partidos_cercanos.sort(key=lambda x: x["fecha"])
-    return partidos_cercanos[:10] # Mostramos los primeros 10
+    partidos.sort(key=lambda x: x["fecha"])
+    return partidos
 
 def enviar_telegram(mensaje: str):
     try:
-        url = f"{API_URL}/sendMessage"
-        payload = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML"}
-        requests.post(url, json=payload, timeout=10)
+        requests.post(f"{API_URL}/sendMessage", json={"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML"}, timeout=10)
     except Exception as e:
         logging.error(f"Error Telegram: {e}")
 
@@ -135,12 +127,16 @@ def main():
     partidos_api = obtener_partidos_y_cuotas()
     
     msg = f"☀️ <b>REPORTE MATUTINO PRO - {fecha}</b>\n"
-    msg += "Análisis de Poisson + Cuotas Reales (Próximos 7 días):\n\n"
+    msg += "<i>Análisis de Poisson + Cuotas Reales (Próximos 7 días)</i>\n\n"
     
     if not partidos_api:
-        msg += "⚠️ <i>No se encontraron partidos en las ligas seleccionadas para los próximos 7 días.</i>\n"
+        msg += "⚠️ <i>No hay partidos de clubes disponibles en este momento.</i>\n"
     else:
+        partidos_mostrados = 0
         for p in partidos_api:
+            if partidos_mostrados >= 6: # Límite de 6 partidos por reporte
+                break
+                
             xg_l, xga_l = obtener_xg(p["local"])
             xg_v, xga_v = obtener_xg(p["visitante"])
             
@@ -154,23 +150,25 @@ def main():
             ev_e, val_e = calcular_ev(probs['empate'], cuotas['empate'])
             ev_v, val_v = calcular_ev(probs['visitante'], cuotas['visitante'])
             
-            fecha_formateada = p["fecha"][:16].replace("T", " ") if p["fecha"] else "Fecha N/D"
+            # Formatear fecha a hora Argentina (UTC-3)
+            fecha_partido = datetime.fromisoformat(p["fecha"].replace("Z", "+00:00")) - timedelta(hours=3)
+            fecha_formateada = fecha_partido.strftime("%d/%m %H:%M hs")
             
             msg += f"🏆 <b>{p['local']} vs {p['visitante']}</b>\n"
-            msg += f"📅 {fecha_formateada} UTC\n"
-            msg += f"📊 Prob: Local {probs['local']:.1%} | Empate {probs['empate']:.1%} | Visitante {probs['visitante']:.1%}\n"
-            msg += f"💰 Cuotas: Local {cuotas['local']} | Empate {cuotas['empate']} | Visitante {cuotas['visitante']}\n"
+            msg += f"📅 {fecha_formateada}\n"
+            msg += f"📊 Local: {probs['local']:.1%} | Empate: {probs['empate']:.1%} | Visita: {probs['visitante']:.1%}\n"
+            msg += f"💰 Cuotas: {cuotas['local']} | {cuotas['empate']} | {cuotas['visitante']}\n"
             
             if val_l: msg += f"🚨 <b>VALUE BET LOCAL:</b> EV +{(ev_l-1)*100:.1f}%\n"
             if val_e: msg += f"🚨 <b>VALUE BET EMPATE:</b> EV +{(ev_e-1)*100:.1f}%\n"
             if val_v: msg += f"🚨 <b>VALUE BET VISITANTE:</b> EV +{(ev_v-1)*100:.1f}%\n"
             
-            if not (val_l or val_e or val_v): msg += f"🛡️ Sin Value Bets (Mercado eficiente).\n"
+            if not (val_l or val_e or val_v): msg += f"🛡️ Sin Value Bets.\n"
             msg += "➖➖➖➖➖➖➖➖\n"
+            partidos_mostrados += 1
         
     msg += "\n🤖 <i>Generado por Terminator Motor Predictivo</i>"
     enviar_telegram(msg)
-    logging.info("Reporte enviado.")
 
 if __name__ == "__main__":
     main()
