@@ -16,14 +16,18 @@ API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
-# --- DICCIONARIO DE CUOTAS REALES (Ingresá acá las cuotas que veas en tu casa de apuestas antes de las 8 AM) ---
+# --- DICCIONARIO DE CUOTAS REALES ---
+# Acá podés ir agregando las cuotas de tu casa de apuestas.
 # Formato: "nombre_equipo_local_nombre_equipo_visitante": {"local": X, "empate": Y, "visitante": Z}
 CUOTAS_MANUALES = {
-    # Ejemplo (los nombres deben coincidir con los de Promiedos):
-    # "boca juniors_river plate": {"local": 2.50, "empate": 3.10, "visitante": 2.80}
+    # Ejemplos con cuotas inventadas para probar el Value Bet:
+    "internacional_boca juniors": {"local": 2.10, "empate": 3.40, "visitante": 4.50},
+    "estudiantes_gimnasia de jujuy": {"local": 2.50, "empate": 3.10, "visitante": 3.20},
+    "arsenal de sarandí_river plate": {"local": 5.50, "empate": 3.80, "visitante": 1.60},
+    "gimnasia la plata_boston river": {"local": 1.85, "empate": 3.30, "visitante": 4.20}
 }
 
-# --- MOTOR MATEMÁTICO ---
+# --- MOTOR MATEMÁTICO (POISSON) ---
 def poisson_pmf(k: int, lam: float) -> float:
     return (lam**k * math.exp(-lam)) / math.factorial(k)
 
@@ -64,7 +68,7 @@ def obtener_xg(equipo: str) -> Tuple[float, float]:
         logging.error(f"Error BD: {e}")
     return 1.3, 1.1 
 
-# --- SCRAPING DE PARTIDOS DEL DÍA ---
+# --- SCRAPING DE PARTIDOS DEL DÍA (PROMIEDOS) ---
 def obtener_partidos_hoy() -> List[Tuple[str, str]]:
     partidos = []
     try:
@@ -91,10 +95,15 @@ def obtener_partidos_hoy() -> List[Tuple[str, str]]:
                         partidos.append((equipos_en_pagina[i], equipos_en_pagina[i+1]))
                         
             if not partidos:
+                logging.warning("Scraper no encontró partidos. Usando fallback de prueba.")
                 partidos = [("boca juniors", "river plate")]
+                
+            logging.info(f"Scraper extrajo {len(partidos)} partidos.")
+            
     except Exception as e:
-        logging.error(f"Error scraper: {e}")
+        logging.error(f"Error en el scraper: {e}")
         partidos = [("boca juniors", "river plate")]
+        
     return partidos
 
 def enviar_telegram(mensaje: str):
@@ -103,7 +112,7 @@ def enviar_telegram(mensaje: str):
         payload = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML"}
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        logging.error(f"Error Telegram: {e}")
+        logging.error(f"Error enviando Telegram: {e}")
 
 def main():
     logging.info("=== INICIANDO REPORTE MATUTINO PRO CON VALUE BET ===")
@@ -117,6 +126,7 @@ def main():
         xg_l, xga_l = obtener_xg(local)
         xg_v, xga_v = obtener_xg(visitante)
         
+        # Cálculo de xG esperado (Ataque Local vs Defensa Visitante y viceversa)
         xg_local_final = (xg_l + xga_v) / 2.0
         xg_visitante_final = (xg_v + xga_l) / 2.0
         
@@ -145,6 +155,7 @@ def main():
             
         msg += "➖➖➖➖➖➖➖➖\n"
         
+    msg += "\n🤖 <i>Generado por Terminator Motor Predictivo</i>"
     enviar_telegram(msg)
     logging.info("Reporte enviado.")
 
