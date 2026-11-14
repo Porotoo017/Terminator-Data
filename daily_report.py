@@ -51,15 +51,14 @@ def calcular_ev(prob: float, cuota: float) -> Tuple[float, bool]:
 
 # --- LIMPIADOR DE NOMBRES (Para cruzar API con DB) ---
 def limpiar_nombre_equipo(nombre: str) -> str:
-    # Elimina palabras comunes de la API que no están en la base de datos
     nombre = nombre.lower()
     palabras_basura = ["ca ", "cf ", "fc ", "club atletico ", "ba", "de cordoba", "de la plata", "sarsfield"]
     for palabra in palabras_basura:
         nombre = nombre.replace(palabra, "")
     return nombre.strip()
 
-# --- BASE DE DATOS ---
-def obtener_xg(equipo: str) -> Tuple[float, float]:
+# --- BASE DE DATOS (Con verificación estricta) ---
+def obtener_xg(equipo: str) -> Tuple[float, float, bool]:
     equipo_limpio = limpiar_nombre_equipo(equipo)
     try:
         with sqlite3.connect(DB_PATH) as conn:
@@ -68,10 +67,11 @@ def obtener_xg(equipo: str) -> Tuple[float, float]:
                 (f"%{equipo_limpio}%",)
             )
             row = cursor.fetchone()
-            if row: return row[0], row[1]
+            if row: 
+                return row[0], row[1], True # True = Datos reales encontrados
     except Exception as e:
         logging.error(f"Error BD: {e}")
-    return 1.3, 1.1 # Fallback si el equipo no está en la DB
+    return 1.3, 1.1, False # False = No se encontró, usar fallback pero avisar
 
 # --- OBTENER PARTIDOS Y CUOTAS ---
 def obtener_partidos_y_cuotas() -> List[Dict]:
@@ -80,6 +80,7 @@ def obtener_partidos_y_cuotas() -> List[Dict]:
     limite_futuro = ahora + timedelta(days=7)
 
     if not ODDS_API_KEY:
+        logging.warning("ODDS_API_KEY no configurada.")
         return []
 
     for sport in SPORT_KEYS:
@@ -137,9 +138,14 @@ def main():
             if partidos_mostrados >= 6: # Límite de 6 partidos por reporte
                 break
                 
-            xg_l, xga_l = obtener_xg(p["local"])
-            xg_v, xga_v = obtener_xg(p["visitante"])
+            xg_l, xga_l, found_l = obtener_xg(p["local"])
+            xg_v, xga_v, found_v = obtener_xg(p["visitante"])
             
+            # FILTRO ANTI-FALSOS POSITIVOS: Si no se encontró alguno de los dos equipos en la DB, saltear.
+            if not found_l or not found_v:
+                logging.warning(f"Saltando {p['local']} vs {p['visitante']} por falta de datos reales en la DB.")
+                continue
+
             xg_local_final = (xg_l + xga_v) / 2.0
             xg_visitante_final = (xg_v + xga_l) / 2.0
             
@@ -166,6 +172,9 @@ def main():
             if not (val_l or val_e or val_v): msg += f"🛡️ Sin Value Bets.\n"
             msg += "➖➖➖➖➖➖➖➖\n"
             partidos_mostrados += 1
+        
+    if partidos_mostrados == 0:
+        msg += "🛡️ <i>Todos los partidos fueron filtrados porque los equipos no están en la base de datos histórica.</i>\n"
         
     msg += "\n🤖 <i>Generado por Terminator Motor Predictivo</i>"
     enviar_telegram(msg)
